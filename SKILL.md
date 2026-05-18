@@ -1,0 +1,136 @@
+---
+name: dirty-claude
+description: Audit and clean up your Claude Code installation — MCPs, memory, settings, hooks, skills, commands, agents, plugins, ghost caches, orphan launchd. Read-only by default with per-finding greenlight. Triggers on "dirty claude", "/dirty-claude", "clean up cc", "audit my claude code setup", "cc hygiene", "what's bloated in claude code", "claude code spring cleaning".
+---
+
+# /dirty-claude
+
+Walk a user through a comprehensive Claude Code installation cleanup. **Read-only audit by default**, with per-finding greenlight before any change. Workflow-preserving — never silently changes behavior.
+
+Born from a real session that found dead MCPs, broken hook matchers pointing at uninstalled tools, an orphan launchd job running daily, ghost cache entries, MEMORY.md truncating past line 200, 47 skills with only 5 actually used, and a Windows path in known_marketplaces.json from a cross-platform write. None of which existing tools catch.
+
+## Where this fits in the landscape
+
+| Tool | What it does | Where dirty-claude defers |
+|---|---|---|
+| [`unclog`](https://github.com/thomaschill/unclog) | Skill/command/MCP/agent token cost + 30-day invocation walk from session JSONLs. Interactive picker. | **dirty-claude defers to unclog for token-cost inventory.** Recommend `uv tool install unclog && unclog` for that piece. |
+| [`/fewer-permission-prompts`](https://docs.claude.com/claude-code) (Anthropic official) | Scans transcripts to suggest allowlist patterns | **dirty-claude defers** — run it before this skill |
+| [`mcpick`](https://github.com/spences10/mcpick) | TUI to enable/disable MCPs + plugins | Complementary — use mcpick for enable/disable; dirty-claude for audit |
+
+dirty-claude covers the gaps no other tool catches: hook matcher staleness, MEMORY.md truncation, ghost caches, orphan launchd, project-scoped `~/.claude.json` drift, cross-platform marketplace path corruption, and the workflow-preserving restructure patterns.
+
+## Phases
+
+### Phase 1 — Inventory (read-only, fast)
+
+Counts and sizes — no edits:
+- MCP servers: working / needs-auth / failed-to-connect (via `claude mcp list`)
+- `~/.claude.json`: file size, count of project-scoped entries
+- `~/.claude/skills/`, `commands/`, `agents/`, `hooks/`: file counts
+- Plugins: enabled / failed-to-load / marketplaces registered
+- MEMORY.md: line count + truncation risk (system truncates past ~200 lines)
+- `~/.claude/state/`, `~/.claude/projects/`, `file-history/`, `plugins/` sizes
+- `~/Library/Caches/claude-cli-nodejs/` size (not covered by `cleanupPeriodDays`)
+
+Output a one-screen summary table.
+
+### Phase 2 — Audit by category
+
+#### A. MCP health
+- **Failed-to-connect MCPs.** Likely stale URL or vendor renamed (e.g., Mapbox now rejects OAuth client names containing "mapbox" — re-register with a brand-free alias).
+- **"Needs auth" MCPs.** Separate intentional (e.g., paid data vendor not subscribed) from drift.
+- **Plugin-shipped MCPs.** If user uninstalled the plugin but `~/.claude.json` still references its MCPs, surface for cleanup.
+- **Project-scoped MCP drift.** `~/.claude.json` `projects[<path>].mcpServers` often retains MCPs after global cleanup. Walk each project.
+
+#### B. Hook matcher staleness  *(unique to dirty-claude)*
+For each hook in `~/.claude/settings.json`, check matcher regex against currently-installed MCPs. Flag matchers referencing tools that don't exist. Common pattern: MCP gets renamed/replaced (e.g., `workspace-mcp` → `google-multi`), hook matchers stay tied to old names, hooks silently never fire, user thinks auto-approval is broken.
+
+Propose matcher patches.
+
+#### C. Ghost caches  *(unique)*
+- `~/.claude/mcp-needs-auth-cache.json` — entries for uninstalled plugin MCPs survive uninstall. Rebuild without ghosts (preserve legit "needs auth" entries).
+- `~/.claude/hooks/*.bak` and `*.disabled` — stale snapshots referenced from configs that may not actually fire.
+- Stale `settings.json.bak-*` files (keep latest, archive rest).
+
+#### D. Orphan launchd agents  *(unique, macOS-specific)*
+Walk `~/Library/LaunchAgents/com.*`. For each, check what scripts/MCPs it references. Flag agents that:
+- Refresh tokens for uninstalled MCPs
+- Run scripts that no longer exist
+- Fire daily and silently fail
+
+#### E. MEMORY.md size + load truncation  *(unique)*
+- `>200 lines` → truncation alert (lines past ~200 don't load).
+- Propose project + topic conditional-load restructure:
+  ```
+  memory/
+  ├── MEMORY.md                       (lean: rules + identity + pointers, <150 lines)
+  ├── projects/<name>.md              (load on project mention)
+  └── topics/<name>.md                (load on task type — voice, browser, payments, etc.)
+  ```
+- Audit `@-import` chains for dead links.
+
+#### F. Per-project `~/.claude.json` drift
+- Find project entries with MCPs uninstalled from global scope.
+- **Cross-platform write artifact**: `installLocation` containing `C:\...` paths from a Windows session. Triggers `claude plugin marketplace update` failures. Fix: `claude plugin marketplace remove <name> && claude plugin marketplace add <name>`.
+
+#### G. Skill / command / agent inventory
+- **Defer to `unclog`** for skill + command + MCP token cost and 30-day invocation counts from session JSONLs (real ground truth).
+- dirty-claude adds: zero-reference agent detection (grep skills/commands/settings/hooks for each agent name; if zero references, archive).
+- "Older version, X is the rebuild" duplicates (heuristic: name suffixes like `-old`, parallel `newsletter` vs `nl`).
+
+#### H. Plugin install state
+- `enabledPlugins` entries that don't resolve in any marketplace (renamed/removed upstream).
+- Failed-to-load plugins: often empty `hooks.json` shipped in plugin (Zod expects `{"hooks": {}}`, plugin ships `{}`). Local patch documented; file upstream PR.
+- Marketplaces with cross-platform path corruption (see F).
+
+#### I. Disk bloat *(OPT-IN — many users don't care about storage)*
+Only run with `--storage` flag or explicit user request:
+- `~/.claude/file-history/` >5GB (bug #10107 can reach 300GB)
+- `~/Library/Caches/claude-cli-nodejs/` not covered by `cleanupPeriodDays`
+- Session JSONLs grown unbounded
+- `cleanupPeriodDays` setting absent (retention sweep off by default)
+- Multiple stale `.backup.*` files
+- `claude project purge` candidates (archived/abandoned projects)
+
+### Phase 3 — Per-finding triage
+
+For each finding:
+- **Diff or before/after.** Show what would change.
+- **Risk:** `SAFE` (deletes confirmed-orphaned files) / `NEEDS_REVIEW` (might affect workflow) / `DESTRUCTIVE` (irreversible).
+- **Workflow impact:** `NONE` / `RESTORE_BROKEN_UX` (e.g., re-enable auto-approve hook) / `BEHAVIORAL_CHANGE` (e.g., wildcard permissions).
+- **Confidence:** 10/10 (verified) → 1/10 (inferred). State the verification method.
+- **Per-item greenlight** required for `NEEDS_REVIEW` and `DESTRUCTIVE`. `SAFE` items can be batched.
+
+### Phase 4 — Execute with backups
+
+- Auto-backup before any edit: `settings.json.bak-YYYY-MM-DD`, `MEMORY.md.bak-YYYY-MM-DD`, `.claude.json.bak-YYYY-MM-DD`.
+- Default to **archive, not delete**: `mv` to `~/.claude/<thing>-archive-YYYY-MM-DD/`.
+- Hard-delete only when user explicitly confirms.
+
+### Phase 5 — Recap
+
+- Bullet list of what changed (file:before-line-count → after-line-count).
+- Items deferred / left for user (interactive runs, browser OAuth, etc.).
+- Roadmap file for items parked: `~/.claude/projects/-Users-<...>-CC/memory/projects/cc-cleanup-roadmap.md`.
+
+## Design principles
+
+- **Workflow-preserving by default.** If a cleanup would change behavior, flag for review.
+- **Show before delete.** Diff or content preview for every destructive action.
+- **Backup before write.** Always.
+- **Per-item greenlight.** Batched only for `SAFE` items.
+- **Acknowledge other tools.** When a category is covered by unclog / mcpick / `/fewer-permission-prompts`, defer with the install one-liner.
+- **Confidence ratings inline.** Don't paste recommendations without grading evidence.
+- **Disk bloat is opt-in.** Some users care about storage, some don't. Don't assume.
+
+## Trigger phrases
+
+User invokes via: "dirty claude", "/dirty-claude", "audit my claude code setup", "cc hygiene", "clean up cc", "what's bloated in claude code", "claude code spring cleaning", "find orphan launchd", "check my MEMORY.md size", "audit my hooks".
+
+## Credits
+
+- **[unclog](https://github.com/thomaschill/unclog)** — Python CLI by thomaschill. dirty-claude defers to it for skill/command/MCP token cost + 30-day invocation tracking. MIT.
+- **[`/fewer-permission-prompts`](https://docs.claude.com/claude-code)** — Anthropic official skill for allowlist scanning.
+- **[mcpick](https://github.com/spences10/mcpick)** by spences10 — TUI for enable/disable. Complementary.
+- **Power-user write-ups that informed the gap analysis:** [blog.sshh.io](https://blog.sshh.io/p/how-i-use-every-claude-code-feature), [ghuntley.com](https://ghuntley.com/loop/), [alexop.dev](https://alexop.dev/posts/stop-bloating-your-claude-md-progressive-disclosure-ai-coding-tools/), [mindstudio context-rot research](https://www.mindstudio.ai/blog/what-is-context-rot-claude-code).
+- Built from a real 4-hour cleanup session where every category above produced findings nothing else caught.
