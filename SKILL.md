@@ -1,6 +1,9 @@
 ---
 name: dirty-claude
-description: Audit and clean up a Claude Code installation specifically — MCP servers, MEMORY.md, settings.json, hooks, skills, agents, plugins, ghost caches, orphan launchd jobs. Read-only by default with per-finding greenlight. Triggers ONLY when user mentions Claude Code internals (MCP, hooks, plugins, MEMORY, settings.json, ~/.claude): "dirty claude", "/dirty-claude", "audit my claude code setup", "cc hygiene", "what's bloated in claude code installation", "clean up my .claude directory", "audit claude code hooks", "find orphan launchd for claude". Does NOT trigger on generic "clean up codebase" or non-Claude-Code repo work.
+description: |
+  Audit and clean up a Claude Code installation specifically: MCP servers, MEMORY.md, settings.json, hooks, skills, agents, plugins, ghost caches, orphan launchd jobs. Read-only by default with per-finding greenlight. Use only when user mentions Claude Code internals such as MCP, hooks, plugins, MEMORY, settings.json, ~/.claude, "dirty claude", "/dirty-claude", "audit my claude code setup", "cc hygiene", "clean up my .claude directory", "audit claude code hooks", or "find orphan launchd for claude". Do not trigger on generic codebase cleanup.
+allowed-tools:
+  - Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/dirty_claude_inventory.py *)
 ---
 
 # /dirty-claude
@@ -22,6 +25,20 @@ dirty-claude focuses on categories the above tools don't fully cover: hook match
 ## Phases
 
 ### Phase 1 — Inventory (read-only, fast)
+
+Run the bundled read-only inventory first:
+
+```bash
+python3 ${CLAUDE_SKILL_DIR}/scripts/dirty_claude_inventory.py
+```
+
+If the user passed `--storage`, include that flag:
+
+```bash
+python3 ${CLAUDE_SKILL_DIR}/scripts/dirty_claude_inventory.py --storage
+```
+
+The script only reads local Claude Code state and prints Markdown. If it fails, report the error and continue manually with read-only commands.
 
 Counts and sizes — no edits:
 - MCP servers: working / needs-auth / failed-to-connect (via `claude mcp list`)
@@ -113,7 +130,11 @@ For each finding:
 - **Confidence:** 10/10 (verified) → 1/10 (inferred). State the verification method.
 - **Per-item greenlight** required for `NEEDS_REVIEW` and `DESTRUCTIVE`. `SAFE` items can be batched.
 
+Stop after presenting findings unless the user explicitly greenlights cleanup. Do not edit files, move archives, run `claude project purge`, remove marketplaces, or change hooks during the same response that first presents findings.
+
 ### Phase 4 — Execute with backups
+
+Only enter this phase after explicit user approval for the specific finding or batch.
 
 - Auto-backup before any edit: `settings.json.bak-YYYY-MM-DD`, `MEMORY.md.bak-YYYY-MM-DD`, `.claude.json.bak-YYYY-MM-DD`.
 - Default to **archive, not delete**: `mv` to `~/.claude/<thing>-archive-YYYY-MM-DD/`.

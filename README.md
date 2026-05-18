@@ -1,6 +1,6 @@
 # dirty-claude
 
-A Claude Code skill that audits and cleans bloat that other hygiene tools tend to miss.
+A Claude Code skill that audits and cleans bloat that other hygiene tools tend to miss. It includes a bundled read-only inventory script so the first pass is grounded in local Claude Code state instead of vibes.
 
 ```
 /dirty-claude
@@ -38,9 +38,16 @@ Verify Claude Code sees it:
 
 ## Usage
 
-Open Claude Code, type `/dirty-claude` (or any trigger phrase like "audit my claude code setup"). The skill takes over, runs the inventory, presents findings, asks for greenlight per finding.
+Open Claude Code, type `/dirty-claude` (or any trigger phrase like "audit my claude code setup"). The skill runs its bundled read-only inventory, presents findings, and stops for greenlight before any cleanup.
 
 By default it skips disk-storage cleanup. Pass `--storage` if you want size warnings on `~/.claude/file-history/`, `~/Library/Caches/claude-cli-nodejs/`, etc.
+
+You can also run the inventory directly:
+
+```bash
+python3 ~/.claude/skills/dirty-claude/scripts/dirty_claude_inventory.py
+python3 ~/.claude/skills/dirty-claude/scripts/dirty_claude_inventory.py --storage
+```
 
 ## What it does NOT do
 
@@ -54,6 +61,7 @@ By default it skips disk-storage cleanup. Pass `--storage` if you want size warn
 
 - Read-only by default
 - Per-finding greenlight
+- Bundled read-only inventory before recommendations
 - Auto-backup before any edit
 - Confidence ratings on every recommendation
 - Workflow-preserving: don't change behavior unless told
