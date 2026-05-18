@@ -41,6 +41,8 @@ Output a one-screen summary table.
 - **"Needs auth" MCPs.** Separate intentional (e.g., paid data vendor not subscribed) from drift.
 - **Plugin-shipped MCPs.** If user uninstalled the plugin but `~/.claude.json` still references its MCPs, surface for cleanup.
 - **Project-scoped MCP drift.** `~/.claude.json` `projects[<path>].mcpServers` often retains MCPs after global cleanup. Walk each project.
+- **Redundant MCPs.** When two installed MCPs cover the same surface (e.g., `gdrive` reference MCP + `google-multi` covering Drive across multiple accounts), flag the narrower one for removal.
+- **`settings.json` permission allowlist drift.** Scan `permissions.allow` and `permissions.ask` for entries matching `mcp__<name>__*` where `<name>` is not in the current installed-MCP list. Common after MCP renames or plugin uninstalls — leaves dozens or hundreds of dead permission entries. Propose removal; preserve any wildcard or non-MCP entries.
 
 #### B. Hook matcher staleness  *(unique to dirty-claude)*
 For each hook in `~/.claude/settings.json`, check matcher regex against currently-installed MCPs. Flag matchers referencing tools that don't exist. Common pattern: MCP gets renamed/replaced (e.g., `workspace-mcp` → `google-multi`), hook matchers stay tied to old names, hooks silently never fire, user thinks auto-approval is broken.
@@ -83,14 +85,24 @@ Walk `~/Library/LaunchAgents/com.*`. For each, check what scripts/MCPs it refere
 - Failed-to-load plugins: often empty `hooks.json` shipped in plugin (Zod expects `{"hooks": {}}`, plugin ships `{}`). Local patch documented; file upstream PR.
 - Marketplaces with cross-platform path corruption (see F).
 
-#### I. Disk bloat *(OPT-IN — many users don't care about storage)*
+#### I. Archived project purge  *(in main flow — frequent vibe-coder failure mode)*
+Most CC users accumulate `~/.claude.json` `projects[<path>]` entries for repos they've abandoned. Each carries full transcripts, file-history, task state, and permission grants. `claude project purge <path>` (v2.1.126+) cleanly removes all of it.
+
+Detection heuristics for purge candidates:
+- Project last touched (per most recent session JSONL mtime) more than 30/60/90 days ago
+- Repo no longer exists on disk
+- Project marked archived in user's memory / notes (search `feedback_*archived*` patterns)
+- Project name matches a removed Vercel project, killed git repo, etc.
+
+Always `--dry-run` first to show the item count per path before executing. `tar` transcripts to `~/archive/` if user wants a reversible snapshot.
+
+#### J. Disk bloat  *(OPT-IN — many users don't care about storage)*
 Only run with `--storage` flag or explicit user request:
 - `~/.claude/file-history/` >5GB. Issue [anthropics/claude-code#10107](https://github.com/anthropics/claude-code/issues/10107) reports user cases with hundreds of GB; treat as a known accumulation risk, not a formal limit.
 - `~/Library/Caches/claude-cli-nodejs/` not covered by `cleanupPeriodDays`.
 - Session JSONLs grown unbounded.
 - `cleanupPeriodDays` setting absent (retention sweep off by default).
 - Multiple stale `.backup.*` files.
-- `claude project purge` candidates (archived/abandoned projects).
 
 ### Phase 3 — Per-finding triage
 
