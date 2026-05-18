@@ -1,6 +1,6 @@
 # dirty-claude
 
-A Claude Code skill that finds and cleans the bloat no other tool catches.
+A Claude Code skill that audits and cleans bloat that other hygiene tools tend to miss.
 
 ```
 /dirty-claude
@@ -10,17 +10,17 @@ A Claude Code skill that finds and cleans the bloat no other tool catches.
 
 Walks you through a one-screen audit of your Claude Code install, surfaces findings with confidence ratings, and lets you greenlight each cleanup. Workflow-preserving by default — never silently changes behavior.
 
-Real findings from one session:
-- 8 dead MCPs from a plugin you don't use anymore
-- 3 hook matchers pointing at MCPs that don't exist
-- An orphan `launchd` agent firing daily, refreshing tokens for a tool uninstalled weeks ago
+Sample findings from one real cleanup session (your install will differ):
+- 8 dead MCPs left over from an uninstalled plugin
+- 3 hook matchers pointing at MCPs that no longer existed
+- An orphan `launchd` agent firing daily, refreshing tokens for a tool uninstalled weeks earlier
 - 7 ghost entries in `mcp-needs-auth-cache.json`
-- MEMORY.md at 384 lines (system truncates past ~200 — half your memory was invisible)
-- 47 user skills, 5 actually used in 30 days
+- A 384-line MEMORY.md (observed load truncation around the 200-line mark in that session)
+- 47 user skills with only 5 invoked in the prior 30 days
 - A Windows path (`C:\Users\...`) inside `known_marketplaces.json` from a cross-platform write
-- Settings.json carrying 146 lines of permission entries for MCPs gone for weeks
+- `settings.json` carrying 146 lines of permission entries for MCPs gone for weeks
 
-Existing hygiene tools (unclog, mcpick, `/fewer-permission-prompts`) cover token cost and tool management. dirty-claude covers everything else: hook staleness, ghost caches, orphan launchd, MEMORY truncation, project-scoped drift, cross-platform path corruption, plugin schema bugs.
+Existing hygiene tools cover token cost ([unclog](https://github.com/thomaschill/unclog)), MCP/plugin enable-disable ([mcpick](https://github.com/spences10/mcpick)), and permission allowlist scanning (Anthropic's `/fewer-permission-prompts`). dirty-claude focuses on the categories those tools don't: hook matcher staleness, ghost caches, orphan launchd jobs, MEMORY.md size/truncation, project-scoped `~/.claude.json` drift, cross-platform path corruption, plugin schema bugs.
 
 ## Install
 

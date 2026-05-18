@@ -1,23 +1,23 @@
 ---
 name: dirty-claude
-description: Audit and clean up your Claude Code installation — MCPs, memory, settings, hooks, skills, commands, agents, plugins, ghost caches, orphan launchd. Read-only by default with per-finding greenlight. Triggers on "dirty claude", "/dirty-claude", "clean up cc", "audit my claude code setup", "cc hygiene", "what's bloated in claude code", "claude code spring cleaning".
+description: Audit and clean up a Claude Code installation specifically — MCP servers, MEMORY.md, settings.json, hooks, skills, agents, plugins, ghost caches, orphan launchd jobs. Read-only by default with per-finding greenlight. Triggers ONLY when user mentions Claude Code internals (MCP, hooks, plugins, MEMORY, settings.json, ~/.claude): "dirty claude", "/dirty-claude", "audit my claude code setup", "cc hygiene", "what's bloated in claude code installation", "clean up my .claude directory", "audit claude code hooks", "find orphan launchd for claude". Does NOT trigger on generic "clean up codebase" or non-Claude-Code repo work.
 ---
 
 # /dirty-claude
 
 Walk a user through a comprehensive Claude Code installation cleanup. **Read-only audit by default**, with per-finding greenlight before any change. Workflow-preserving — never silently changes behavior.
 
-Born from a real session that found dead MCPs, broken hook matchers pointing at uninstalled tools, an orphan launchd job running daily, ghost cache entries, MEMORY.md truncating past line 200, 47 skills with only 5 actually used, and a Windows path in known_marketplaces.json from a cross-platform write. None of which existing tools catch.
+Born from one real cleanup session that surfaced dead MCPs, broken hook matchers pointing at uninstalled tools, an orphan launchd job, ghost cache entries, a MEMORY.md large enough to truncate on load (observed at ~200 lines in that session), a Windows path inside `known_marketplaces.json` from a cross-platform write, and a long tail of unused skills/commands. The set of categories below was distilled from that session and from the gaps identified in existing tools.
 
 ## Where this fits in the landscape
 
 | Tool | What it does | Where dirty-claude defers |
 |---|---|---|
-| [`unclog`](https://github.com/thomaschill/unclog) | Skill/command/MCP/agent token cost + 30-day invocation walk from session JSONLs. Interactive picker. | **dirty-claude defers to unclog for token-cost inventory.** Recommend `uv tool install unclog && unclog` for that piece. |
-| [`/fewer-permission-prompts`](https://docs.claude.com/claude-code) (Anthropic official) | Scans transcripts to suggest allowlist patterns | **dirty-claude defers** — run it before this skill |
-| [`mcpick`](https://github.com/spences10/mcpick) | TUI to enable/disable MCPs + plugins | Complementary — use mcpick for enable/disable; dirty-claude for audit |
+| [`unclog`](https://github.com/thomaschill/unclog) (MIT, Thomas Chill) | Skill/command/MCP/agent token cost + 30-day invocation walk from session JSONLs. Interactive picker. | **dirty-claude defers to unclog for token-cost inventory.** Recommend `uv tool install unclog && unclog` for that piece. |
+| [`/fewer-permission-prompts`](https://code.claude.com/docs/en/commands) (Anthropic official, ships with Claude Code) | Scans transcripts to suggest allowlist patterns | **dirty-claude defers** — run it before this skill |
+| [`mcpick`](https://github.com/spences10/mcpick) (MIT, Scott Spence) | TUI to enable/disable MCPs + plugins, cache pruning | Complementary — use mcpick for enable/disable; dirty-claude for audit |
 
-dirty-claude covers the gaps no other tool catches: hook matcher staleness, MEMORY.md truncation, ghost caches, orphan launchd, project-scoped `~/.claude.json` drift, cross-platform marketplace path corruption, and the workflow-preserving restructure patterns.
+dirty-claude focuses on categories the above tools don't fully cover: hook matcher staleness, MEMORY.md size/load truncation, ghost caches, orphan launchd agents, project-scoped `~/.claude.json` drift, cross-platform marketplace path corruption from Windows↔macOS writes, and workflow-preserving restructure patterns.
 
 ## Phases
 
@@ -59,7 +59,7 @@ Walk `~/Library/LaunchAgents/com.*`. For each, check what scripts/MCPs it refere
 - Fire daily and silently fail
 
 #### E. MEMORY.md size + load truncation  *(unique)*
-- `>200 lines` → truncation alert (lines past ~200 don't load).
+- Large MEMORY.md files can hit a load-truncation threshold observed around line 200 in tested sessions (verify against your version of Claude Code before relying on the exact cutoff). Flag files past 200 lines for review.
 - Propose project + topic conditional-load restructure:
   ```
   memory/
@@ -71,7 +71,7 @@ Walk `~/Library/LaunchAgents/com.*`. For each, check what scripts/MCPs it refere
 
 #### F. Per-project `~/.claude.json` drift
 - Find project entries with MCPs uninstalled from global scope.
-- **Cross-platform write artifact**: `installLocation` containing `C:\...` paths from a Windows session. Triggers `claude plugin marketplace update` failures. Fix: `claude plugin marketplace remove <name> && claude plugin marketplace add <name>`.
+- **Cross-platform write artifact**: `installLocation` containing `C:\...` paths from a prior Windows session. Triggers `claude plugin marketplace update` failures. Fix: `claude plugin marketplace remove <name> && claude plugin marketplace add <name>`. (In a Claude Code session, equivalent commands are also available via `/plugin marketplace`.)
 
 #### G. Skill / command / agent inventory
 - **Defer to `unclog`** for skill + command + MCP token cost and 30-day invocation counts from session JSONLs (real ground truth).
@@ -85,12 +85,12 @@ Walk `~/Library/LaunchAgents/com.*`. For each, check what scripts/MCPs it refere
 
 #### I. Disk bloat *(OPT-IN — many users don't care about storage)*
 Only run with `--storage` flag or explicit user request:
-- `~/.claude/file-history/` >5GB (bug #10107 can reach 300GB)
-- `~/Library/Caches/claude-cli-nodejs/` not covered by `cleanupPeriodDays`
-- Session JSONLs grown unbounded
-- `cleanupPeriodDays` setting absent (retention sweep off by default)
-- Multiple stale `.backup.*` files
-- `claude project purge` candidates (archived/abandoned projects)
+- `~/.claude/file-history/` >5GB. Issue [anthropics/claude-code#10107](https://github.com/anthropics/claude-code/issues/10107) reports user cases with hundreds of GB; treat as a known accumulation risk, not a formal limit.
+- `~/Library/Caches/claude-cli-nodejs/` not covered by `cleanupPeriodDays`.
+- Session JSONLs grown unbounded.
+- `cleanupPeriodDays` setting absent (retention sweep off by default).
+- Multiple stale `.backup.*` files.
+- `claude project purge` candidates (archived/abandoned projects).
 
 ### Phase 3 — Per-finding triage
 
