@@ -214,26 +214,54 @@ def count_wired_hooks(settings: dict[str, Any]) -> int:
     return total
 
 
+def find_repo_root(start: Path) -> Path | None:
+    """Walk up from start until we find a .git directory."""
+    for path in [start, *start.parents]:
+        if (path / ".git").exists():
+            return path
+    return None
+
+
 def check_project_baseline(cwd: Path) -> dict[str, Any] | None:
-    """Project-scope checks only run when cwd looks like a git repo."""
-    if not (cwd / ".git").exists():
+    """Project-scope checks fire when cwd is inside a git repo (any depth)."""
+    repo_root = find_repo_root(cwd)
+    if repo_root is None:
         return None
+    project_settings_path = repo_root / ".claude" / "settings.json"
     return {
-        "cwd": str(cwd),
-        "claude_md": check_claude_md(cwd / "CLAUDE.md"),
-        "settings": check_settings_baseline(load_json(cwd / ".claude" / "settings.json"), cwd / ".claude" / "settings.json"),
+        "repo_root": str(repo_root),
+        "claude_md": check_claude_md(repo_root / "CLAUDE.md"),
+        "settings": check_settings_baseline(load_json(project_settings_path), project_settings_path),
     }
 
 
-def baseline_status_label(claude_md: dict, settings_baseline: dict, hooks: int) -> str:
-    """Classify install as blank / partial / configured for the recap line."""
-    has_claude_md = claude_md.get("exists")
-    has_settings_baseline = settings_baseline.get("exists") and settings_baseline.get("deny_coverage", 0) >= 5
-    has_hooks = hooks > 0
-    score = sum([bool(has_claude_md), bool(has_settings_baseline), bool(has_hooks)])
+def json_parse_status(path: Path) -> str:
+    """Returns 'missing' | 'valid' | 'corrupt' | 'unreadable'."""
+    if not path.exists():
+        return "missing"
+    try:
+        text = path.read_text()
+    except OSError:
+        return "unreadable"
+    try:
+        json.loads(text)
+    except json.JSONDecodeError:
+        return "corrupt"
+    return "valid"
+
+
+def baseline_status_label(claude_md: dict, settings_baseline: dict) -> str:
+    """Classify user-scope install as blank / partial / configured for the recap line.
+
+    Hooks are intentionally excluded — they're not bootstrap-installable, so including
+    them in classification produces 'partial' labels with no actionable finding.
+    """
+    has_claude_md = bool(claude_md.get("exists"))
+    has_settings_baseline = bool(settings_baseline.get("exists")) and settings_baseline.get("deny_coverage", 0) >= 5
+    score = sum([has_claude_md, has_settings_baseline])
     if score == 0:
         return "blank"
-    if score < 3:
+    if score == 1:
         return "partial"
     return "configured"
 
@@ -265,9 +293,10 @@ def main() -> int:
 
     user_claude_md = check_claude_md(CLAUDE_DIR / "CLAUDE.md")
     user_settings_baseline = check_settings_baseline(settings, settings_path)
+    user_settings_json_status = json_parse_status(settings_path)
     hooks_wired = count_wired_hooks(settings)
     project_baseline = check_project_baseline(Path.cwd())
-    install_label = baseline_status_label(user_claude_md, user_settings_baseline, hooks_wired)
+    install_label = baseline_status_label(user_claude_md, user_settings_baseline)
 
     print("## Baseline state")
     print()
@@ -278,21 +307,25 @@ def main() -> int:
         print(f"| ~/.claude/CLAUDE.md | exists ({user_claude_md['line_count']} lines, {headers_note}) |")
     else:
         print("| ~/.claude/CLAUDE.md | **missing** |")
-    if user_settings_baseline["exists"]:
+    if user_settings_json_status == "corrupt":
+        print("| ~/.claude/settings.json | **corrupt JSON** (do not auto-edit) |")
+    elif user_settings_json_status == "unreadable":
+        print("| ~/.claude/settings.json | **unreadable** (permissions issue?) |")
+    elif user_settings_baseline["exists"]:
         coverage = user_settings_baseline["deny_coverage"]
         label = "configured" if coverage >= 5 else "bare (low safe-deny coverage)"
         print(f"| ~/.claude/settings.json | {label} ({coverage}/{len(SAFE_DENY_PATTERNS)} safe-deny patterns) |")
     else:
         print("| ~/.claude/settings.json | **missing** |")
-    print(f"| Hooks wired in settings.json | {hooks_wired} |")
+    print(f"| Hooks wired in settings.json | {hooks_wired} (informational; not part of bootstrap baseline) |")
     if project_baseline is not None:
         pcm = project_baseline["claude_md"]
         psb = project_baseline["settings"]
-        cwd_short = project_baseline["cwd"]
+        repo_root = project_baseline["repo_root"]
         if pcm["exists"]:
-            print(f"| ./CLAUDE.md (cwd: {cwd_short}) | exists ({pcm['line_count']} lines) |")
+            print(f"| ./CLAUDE.md (repo: {repo_root}) | exists ({pcm['line_count']} lines) |")
         else:
-            print(f"| ./CLAUDE.md (cwd: {cwd_short}) | **missing** (cwd is a git repo) |")
+            print(f"| ./CLAUDE.md (repo: {repo_root}) | **missing** (you're inside a git repo) |")
         if psb["exists"]:
             print(f"| ./.claude/settings.json | exists ({psb['deny_coverage']}/{len(SAFE_DENY_PATTERNS)} safe-deny patterns) |")
         else:
@@ -321,12 +354,16 @@ def main() -> int:
     print()
     if not user_claude_md["exists"]:
         print("- **Missing baseline:** ~/.claude/CLAUDE.md not present. Bootstrap can install the 7-principle starter version.")
-    if not user_settings_baseline["exists"]:
+    if user_settings_json_status == "corrupt":
+        print("- **CRITICAL: corrupt settings.json:** ~/.claude/settings.json exists but JSON is malformed. Do NOT attempt automated merge. Back up + manually repair, or back up + replace with starter baseline. Phase 4 will not auto-edit a file it can't parse.")
+    elif user_settings_json_status == "unreadable":
+        print("- **Unreadable settings.json:** check file permissions before any bootstrap action.")
+    elif not user_settings_baseline["exists"]:
         print("- **Missing baseline:** ~/.claude/settings.json not present. Bootstrap can install a safe-defaults version.")
     elif user_settings_baseline.get("deny_coverage", 0) < 5:
-        print(f"- **Bare baseline:** ~/.claude/settings.json exists but covers only {user_settings_baseline['deny_coverage']}/{len(SAFE_DENY_PATTERNS)} safe-deny patterns. Bootstrap can extend it.")
+        print(f"- **Bare baseline:** ~/.claude/settings.json exists but covers only {user_settings_baseline['deny_coverage']}/{len(SAFE_DENY_PATTERNS)} safe-deny patterns. Bootstrap can merge missing patterns (valid JSON only).")
     if project_baseline is not None and not project_baseline["claude_md"]["exists"]:
-        print(f"- **Missing project baseline:** cwd is a git repo but ./CLAUDE.md is not present. Run `/init` or have bootstrap install a starter.")
+        print(f"- **Missing project baseline:** you're inside the git repo at {project_baseline['repo_root']} but ./CLAUDE.md is not present. Run `/init` or have bootstrap install a starter.")
     if permission_only:
         print(f"- settings.json has permission entries for MCP names not found in config: {', '.join(permission_only)}")
     if hook_only:
@@ -349,6 +386,7 @@ def main() -> int:
 
     baseline_missing = (
         not user_claude_md["exists"]
+        or user_settings_json_status in {"corrupt", "unreadable"}
         or not user_settings_baseline["exists"]
         or (user_settings_baseline.get("deny_coverage", 0) < 5)
         or (project_baseline is not None and not project_baseline["claude_md"]["exists"])

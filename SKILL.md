@@ -4,6 +4,12 @@ description: |
   Audit, clean, or bootstrap a Claude Code installation: detects blank installs (missing CLAUDE.md / settings.json) and offers a safe baseline, OR audits and cleans accumulated bloat (dead MCPs, stale hook matchers, ghost caches, orphan launchd jobs, oversized MEMORY.md, Windows path corruption). Read-only by default with per-finding greenlight. Use when user mentions Claude Code internals such as MCP, hooks, plugins, MEMORY, settings.json, ~/.claude, "dirty claude", "/dirty-claude", "audit my claude code setup", "cc hygiene", "clean up my .claude directory", "audit claude code hooks", "find orphan launchd for claude", or wants a sane Claude Code baseline installed from scratch. Do not trigger on generic codebase cleanup.
 allowed-tools:
   - Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/dirty_claude_inventory.py *)
+  - Bash(mkdir -p ~/.claude)
+  - Bash(mkdir -p ~/.claude/*)
+  - Bash(cp ${CLAUDE_SKILL_DIR}/starter/CLAUDE.md ~/.claude/CLAUDE.md)
+  - Bash(cp ${CLAUDE_SKILL_DIR}/starter/settings.json ~/.claude/settings.json)
+  - Bash(cp ~/.claude/CLAUDE.md ~/.claude/CLAUDE.md.bak-*)
+  - Bash(cp ~/.claude/settings.json ~/.claude/settings.json.bak-*)
 ---
 
 # /dirty-claude
@@ -169,10 +175,12 @@ Only enter this phase after explicit user approval for the specific finding or b
 
 **Bootstrap install actions** (Phase 2 Category K):
 
-- `cp ${CLAUDE_SKILL_DIR}/starter/CLAUDE.md ~/.claude/CLAUDE.md` — backup-first if a file is already there.
+- Always run `mkdir -p ~/.claude` first — a truly fresh machine may not have the directory.
+- `cp ${CLAUDE_SKILL_DIR}/starter/CLAUDE.md ~/.claude/CLAUDE.md` — backup-first (`cp ~/.claude/CLAUDE.md ~/.claude/CLAUDE.md.bak-YYYY-MM-DD`) if a file is already there.
 - `cp ${CLAUDE_SKILL_DIR}/starter/settings.json ~/.claude/settings.json` — backup-first if a file is already there.
-- For partial settings.json with low safe-deny coverage: merge the missing `deny` patterns into the existing file, don't overwrite. Backup-first.
-- Project-scope: `cp ${CLAUDE_SKILL_DIR}/starter/CLAUDE.md ./CLAUDE.md` only after confirming with the user that the cwd is the right project (don't assume).
+- For partial settings.json with low safe-deny coverage AND valid JSON: use the Edit tool to merge missing `deny` patterns into the existing file, don't overwrite. Backup-first.
+- If `settings.json` exists but JSON is corrupt (inventory will surface this as a finding): do NOT attempt merge. Either back up + replace with the starter baseline, or surface to the user for manual repair. Never silently overwrite a file you couldn't parse.
+- Project-scope: `cp ${CLAUDE_SKILL_DIR}/starter/CLAUDE.md ./CLAUDE.md` only after confirming with the user that the cwd is the right project (don't assume). Project-scope is the one place where the user does need to confirm — the rest of bootstrap runs from the greenlit baseline finding.
 
 Never install hooks during bootstrap. Hooks are discovered through the starter-kit's `NEXT_STEPS.md`, not pushed by this skill.
 
