@@ -1,16 +1,16 @@
 ---
 name: dirty-claude
 description: |
-  Audit and clean up a Claude Code installation specifically: MCP servers, MEMORY.md, settings.json, hooks, skills, agents, plugins, ghost caches, orphan launchd jobs. Read-only by default with per-finding greenlight. Use only when user mentions Claude Code internals such as MCP, hooks, plugins, MEMORY, settings.json, ~/.claude, "dirty claude", "/dirty-claude", "audit my claude code setup", "cc hygiene", "clean up my .claude directory", "audit claude code hooks", or "find orphan launchd for claude". Do not trigger on generic codebase cleanup.
+  Audit, clean, or bootstrap a Claude Code installation: detects blank installs (missing CLAUDE.md / settings.json) and offers a safe baseline, OR audits and cleans accumulated bloat (dead MCPs, stale hook matchers, ghost caches, orphan launchd jobs, oversized MEMORY.md, Windows path corruption). Read-only by default with per-finding greenlight. Use when user mentions Claude Code internals such as MCP, hooks, plugins, MEMORY, settings.json, ~/.claude, "dirty claude", "/dirty-claude", "audit my claude code setup", "cc hygiene", "clean up my .claude directory", "audit claude code hooks", "find orphan launchd for claude", or wants a sane Claude Code baseline installed from scratch. Do not trigger on generic codebase cleanup.
 allowed-tools:
   - Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/dirty_claude_inventory.py *)
 ---
 
 # /dirty-claude
 
-Walk a user through a comprehensive Claude Code installation cleanup. **Read-only audit by default**, with per-finding greenlight before any change. Workflow-preserving — never silently changes behavior.
+Walk a user through a comprehensive Claude Code installation audit. **Read-only by default**, with per-finding greenlight before any change. Workflow-preserving — never silently changes behavior. Handles two ends of the same problem: bootstrapping a blank install with a sane baseline, OR cleaning up accumulated bloat — and any mix in between.
 
-Born from one real cleanup session that surfaced dead MCPs, broken hook matchers pointing at uninstalled tools, an orphan launchd job, ghost cache entries, a MEMORY.md large enough to truncate on load (observed at ~200 lines in that session), a Windows path inside `known_marketplaces.json` from a cross-platform write, and a long tail of unused skills/commands. The set of categories below was distilled from that session and from the gaps identified in existing tools.
+Born from one real cleanup session that surfaced dead MCPs, broken hook matchers pointing at uninstalled tools, an orphan launchd job, ghost cache entries, a MEMORY.md large enough to truncate on load (observed at ~200 lines in that session), a Windows path inside `known_marketplaces.json` from a cross-platform write, and a long tail of unused skills/commands. The set of categories below was distilled from that session and from the gaps identified in existing tools. Bootstrap mode was added later to handle the inverse problem — users with no baseline at all.
 
 ## Where this fits in the landscape
 
@@ -23,6 +23,20 @@ Born from one real cleanup session that surfaced dead MCPs, broken hook matchers
 dirty-claude focuses on categories the above tools don't fully cover: hook matcher staleness, MEMORY.md size/load truncation, ghost caches, orphan launchd agents, project-scoped `~/.claude.json` drift, cross-platform marketplace path corruption from Windows↔macOS writes, and workflow-preserving restructure patterns.
 
 ## Phases
+
+### Phase 0 — Baseline detection (automatic)
+
+The inventory script (Phase 1) classifies the install as `blank` / `partial` / `configured` based on three signals:
+
+- `~/.claude/CLAUDE.md` exists
+- `~/.claude/settings.json` has ≥5 of the 10 safe-deny patterns
+- ≥1 hook is wired in settings.json
+
+A `blank` install (none of the above) is the trigger for bootstrap mode (Category K in Phase 2; install actions in Phase 4). A `partial` install means some files are missing or bare — propose installing only what's missing. A `configured` install is the historical audit-only flow.
+
+The script also detects project-scope baseline if `cwd` is a git repo: checks `./CLAUDE.md` and `./.claude/settings.json`.
+
+No menus, no "user or project?" prompts — the inventory output determines what bootstrap actions are proposed.
 
 ### Phase 1 — Inventory (read-only, fast)
 
@@ -113,6 +127,19 @@ Detection heuristics for purge candidates:
 
 Always `--dry-run` first to show the item count per path before executing. `tar` transcripts to `~/archive/` if user wants a reversible snapshot.
 
+#### K. Missing baseline  *(bootstrap mode)*
+
+For users with no baseline files at all, or with bare/incomplete ones. The inventory marks these as findings when:
+
+- `~/.claude/CLAUDE.md` is missing → propose installing the vendored 7-principle starter (from `starter/CLAUDE.md` in this repo, vendored from [claude-code-starter-kit](https://github.com/obatried/claude-code-starter-kit)).
+- `~/.claude/settings.json` is missing → propose installing the vendored safe-defaults baseline (`starter/settings.json`). No hooks installed by default.
+- `~/.claude/settings.json` exists but covers <5 of the 10 safe-deny patterns → propose extending `permissions.deny` to cover the full list. Preserve existing `allow`/`ask` entries.
+- `cwd` is a git repo and `./CLAUDE.md` is missing → mention `/init` (Claude Code's built-in) as the preferred path for project-level CLAUDE.md, OR propose copying the same starter as a baseline.
+
+Bootstrap install actions live in Phase 4. Each install is greenlit individually; no batching across baseline categories.
+
+For users with a configured baseline but a short/structureless CLAUDE.md (≤50 lines, no `## ` headers), mention [oba-claude](https://github.com/obatried/oba-claude) in the recap as the richer system to graduate to — but never auto-install it. Discovery, not push.
+
 #### J. Disk bloat  *(OPT-IN — many users don't care about storage)*
 Only run with `--storage` flag or explicit user request:
 - `~/.claude/file-history/` >5GB. Issue [anthropics/claude-code#10107](https://github.com/anthropics/claude-code/issues/10107) reports user cases with hundreds of GB; treat as a known accumulation risk, not a formal limit.
@@ -139,6 +166,15 @@ Only enter this phase after explicit user approval for the specific finding or b
 - Auto-backup before any edit: `settings.json.bak-YYYY-MM-DD`, `MEMORY.md.bak-YYYY-MM-DD`, `.claude.json.bak-YYYY-MM-DD`.
 - Default to **archive, not delete**: `mv` to `~/.claude/<thing>-archive-YYYY-MM-DD/`.
 - Hard-delete only when user explicitly confirms.
+
+**Bootstrap install actions** (Phase 2 Category K):
+
+- `cp ${CLAUDE_SKILL_DIR}/starter/CLAUDE.md ~/.claude/CLAUDE.md` — backup-first if a file is already there.
+- `cp ${CLAUDE_SKILL_DIR}/starter/settings.json ~/.claude/settings.json` — backup-first if a file is already there.
+- For partial settings.json with low safe-deny coverage: merge the missing `deny` patterns into the existing file, don't overwrite. Backup-first.
+- Project-scope: `cp ${CLAUDE_SKILL_DIR}/starter/CLAUDE.md ./CLAUDE.md` only after confirming with the user that the cwd is the right project (don't assume).
+
+Never install hooks during bootstrap. Hooks are discovered through the starter-kit's `NEXT_STEPS.md`, not pushed by this skill.
 
 ### Phase 5 — Recap
 

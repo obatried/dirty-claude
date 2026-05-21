@@ -1,6 +1,6 @@
 # dirty-claude
 
-A Claude Code skill that audits and cleans bloat that other hygiene tools tend to miss. It includes a bundled read-only inventory script so the first pass is grounded in local Claude Code state instead of vibes.
+A Claude Code skill that audits, cleans, or bootstraps your install. Detects whether you have nothing set up (blank install → installs a sane baseline) or accumulated bloat (dirty install → audits and cleans). Includes a bundled read-only inventory script so the first pass is grounded in local Claude Code state instead of vibes.
 
 ```
 /dirty-claude
@@ -8,9 +8,11 @@ A Claude Code skill that audits and cleans bloat that other hygiene tools tend t
 
 ## What it does
 
-Walks you through a one-screen audit of your Claude Code install, surfaces findings with confidence ratings, and lets you greenlight each cleanup. Workflow-preserving by default — never silently changes behavior.
+Walks you through a one-screen audit of your Claude Code install, classifies the baseline (`blank` / `partial` / `configured`), surfaces findings with confidence ratings, and lets you greenlight each action — install, cleanup, or both. Workflow-preserving by default — never silently changes behavior. Auto-detects user vs project scope from the current working directory; no menus.
 
-Sample findings from one real cleanup session (your install will differ):
+**For new users with nothing set up** (bootstrap mode): installs a 7-principle CLAUDE.md and a safe-defaults settings.json into `~/.claude/`. Files are vendored from [claude-code-starter-kit](https://github.com/obatried/claude-code-starter-kit). No hooks installed by default — new users discover hooks through that repo's NEXT_STEPS.md.
+
+**For experienced users with months of accumulated bloat** (cleanup mode), sample findings from one real cleanup session (your install will differ):
 - 8 dead MCPs left over from an uninstalled plugin
 - 3 hook matchers pointing at MCPs that no longer existed
 - An orphan `launchd` agent firing daily, refreshing tokens for a tool uninstalled weeks earlier
@@ -66,6 +68,11 @@ python3 ~/.claude/skills/dirty-claude/scripts/dirty_claude_inventory.py --storag
 - Confidence ratings on every recommendation
 - Workflow-preserving: don't change behavior unless told
 - Defer to better tools where they exist
+
+## Related repos
+
+- **[claude-code-starter-kit](https://github.com/obatried/claude-code-starter-kit)** — the same baseline files as standalone, with two short guides (`GETTING_STARTED.md`, `NEXT_STEPS.md`). For users who want to read what each piece does and install manually rather than running this skill.
+- **[oba-claude](https://github.com/obatried/oba-claude)** — the richer CLAUDE.md system to graduate to once the 7-principle starter isn't enough. Adds maintenance policy, companion map, examples sidecar, and a drift-detection script.
 
 ## License
 

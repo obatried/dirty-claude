@@ -159,6 +159,85 @@ def line_count(path: Path) -> int:
         return 0
 
 
+SAFE_DENY_PATTERNS = [
+    "Bash(rm -rf /)*",
+    "Bash(rm -rf ~)*",
+    "Bash(rm -rf .)*",
+    "Bash(mkfs.*)",
+    "Bash(*curl * | bash*)",
+    "Bash(*curl * | sh*)",
+    "Bash(*wget * | bash*)",
+    "Bash(*wget * | sh*)",
+    "Read(**/.ssh/**)",
+    "Read(**/credentials*)",
+]
+
+
+def check_claude_md(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"exists": False, "line_count": 0, "has_section_headers": False}
+    try:
+        text = path.read_text(errors="ignore")
+    except OSError:
+        return {"exists": True, "line_count": 0, "has_section_headers": False}
+    return {
+        "exists": True,
+        "line_count": len(text.splitlines()),
+        "has_section_headers": bool(re.search(r"^## ", text, re.MULTILINE)),
+    }
+
+
+def check_settings_baseline(settings: dict[str, Any], path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"exists": False, "has_permissions": False, "deny_coverage": 0}
+    permissions = settings.get("permissions", {})
+    deny = permissions.get("deny", []) if isinstance(permissions, dict) else []
+    if not isinstance(deny, list):
+        deny = []
+    deny_set = {d for d in deny if isinstance(d, str)}
+    coverage = sum(1 for pat in SAFE_DENY_PATTERNS if pat in deny_set)
+    return {
+        "exists": True,
+        "has_permissions": isinstance(permissions, dict) and bool(permissions),
+        "deny_coverage": coverage,
+    }
+
+
+def count_wired_hooks(settings: dict[str, Any]) -> int:
+    hooks = settings.get("hooks", {})
+    if not isinstance(hooks, dict):
+        return 0
+    total = 0
+    for entries in hooks.values():
+        if isinstance(entries, list):
+            total += len(entries)
+    return total
+
+
+def check_project_baseline(cwd: Path) -> dict[str, Any] | None:
+    """Project-scope checks only run when cwd looks like a git repo."""
+    if not (cwd / ".git").exists():
+        return None
+    return {
+        "cwd": str(cwd),
+        "claude_md": check_claude_md(cwd / "CLAUDE.md"),
+        "settings": check_settings_baseline(load_json(cwd / ".claude" / "settings.json"), cwd / ".claude" / "settings.json"),
+    }
+
+
+def baseline_status_label(claude_md: dict, settings_baseline: dict, hooks: int) -> str:
+    """Classify install as blank / partial / configured for the recap line."""
+    has_claude_md = claude_md.get("exists")
+    has_settings_baseline = settings_baseline.get("exists") and settings_baseline.get("deny_coverage", 0) >= 5
+    has_hooks = hooks > 0
+    score = sum([bool(has_claude_md), bool(has_settings_baseline), bool(has_hooks)])
+    if score == 0:
+        return "blank"
+    if score < 3:
+        return "partial"
+    return "configured"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Read-only Claude Code hygiene inventory.")
     parser.add_argument("--storage", action="store_true", help="Include opt-in disk bloat checks.")
@@ -184,6 +263,43 @@ def main() -> int:
     print(f"| mcp-needs-auth-cache entries | {len(auth_cache) if isinstance(auth_cache, dict) else 0} |")
     print()
 
+    user_claude_md = check_claude_md(CLAUDE_DIR / "CLAUDE.md")
+    user_settings_baseline = check_settings_baseline(settings, settings_path)
+    hooks_wired = count_wired_hooks(settings)
+    project_baseline = check_project_baseline(Path.cwd())
+    install_label = baseline_status_label(user_claude_md, user_settings_baseline, hooks_wired)
+
+    print("## Baseline state")
+    print()
+    print("| Item | Status |")
+    print("|---|---|")
+    if user_claude_md["exists"]:
+        headers_note = "has section headers" if user_claude_md["has_section_headers"] else "no section headers"
+        print(f"| ~/.claude/CLAUDE.md | exists ({user_claude_md['line_count']} lines, {headers_note}) |")
+    else:
+        print("| ~/.claude/CLAUDE.md | **missing** |")
+    if user_settings_baseline["exists"]:
+        coverage = user_settings_baseline["deny_coverage"]
+        label = "configured" if coverage >= 5 else "bare (low safe-deny coverage)"
+        print(f"| ~/.claude/settings.json | {label} ({coverage}/{len(SAFE_DENY_PATTERNS)} safe-deny patterns) |")
+    else:
+        print("| ~/.claude/settings.json | **missing** |")
+    print(f"| Hooks wired in settings.json | {hooks_wired} |")
+    if project_baseline is not None:
+        pcm = project_baseline["claude_md"]
+        psb = project_baseline["settings"]
+        cwd_short = project_baseline["cwd"]
+        if pcm["exists"]:
+            print(f"| ./CLAUDE.md (cwd: {cwd_short}) | exists ({pcm['line_count']} lines) |")
+        else:
+            print(f"| ./CLAUDE.md (cwd: {cwd_short}) | **missing** (cwd is a git repo) |")
+        if psb["exists"]:
+            print(f"| ./.claude/settings.json | exists ({psb['deny_coverage']}/{len(SAFE_DENY_PATTERNS)} safe-deny patterns) |")
+        else:
+            print("| ./.claude/settings.json | not present (optional for project) |")
+    print(f"| **Install state** | **{install_label}** |")
+    print()
+
     code, mcp_output = run_command(["claude", "mcp", "list"])
     print("## MCP list")
     print()
@@ -203,6 +319,14 @@ def main() -> int:
 
     print("## Potential findings")
     print()
+    if not user_claude_md["exists"]:
+        print("- **Missing baseline:** ~/.claude/CLAUDE.md not present. Bootstrap can install the 7-principle starter version.")
+    if not user_settings_baseline["exists"]:
+        print("- **Missing baseline:** ~/.claude/settings.json not present. Bootstrap can install a safe-defaults version.")
+    elif user_settings_baseline.get("deny_coverage", 0) < 5:
+        print(f"- **Bare baseline:** ~/.claude/settings.json exists but covers only {user_settings_baseline['deny_coverage']}/{len(SAFE_DENY_PATTERNS)} safe-deny patterns. Bootstrap can extend it.")
+    if project_baseline is not None and not project_baseline["claude_md"]["exists"]:
+        print(f"- **Missing project baseline:** cwd is a git repo but ./CLAUDE.md is not present. Run `/init` or have bootstrap install a starter.")
     if permission_only:
         print(f"- settings.json has permission entries for MCP names not found in config: {', '.join(permission_only)}")
     if hook_only:
@@ -223,7 +347,13 @@ def main() -> int:
         for path, lines in large_memory[:10]:
             print(f"  - {path}: {lines} lines")
 
-    if not any((permission_only, hook_only, windows_marketplaces, launch_findings, large_memory)):
+    baseline_missing = (
+        not user_claude_md["exists"]
+        or not user_settings_baseline["exists"]
+        or (user_settings_baseline.get("deny_coverage", 0) < 5)
+        or (project_baseline is not None and not project_baseline["claude_md"]["exists"])
+    )
+    if not any((permission_only, hook_only, windows_marketplaces, launch_findings, large_memory, baseline_missing)):
         print("- No obvious findings from the read-only inventory.")
     print()
 

@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Edit",
+      "Write",
+      "WebFetch",
+      "WebSearch",
+      "Skill(*)",
+      "Bash(git status)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(ls:*)",
+      "Bash(pwd)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)"
+    ],
+    "deny": [
+      "Read(**/.ssh/**)",
+      "Read(**/credentials*)",
+      "Read(**/.credentials*)",
+      "Bash(cat */.ssh/*)",
+      "Bash(rm -rf /)*",
+      "Bash(rm -rf ~)*",
+      "Bash(rm -rf .)*",
+      "Bash(mkfs.*)",
+      "Bash(dd if=*of=/dev*)",
+      "Bash(chmod -R 777 /)*",
+      "Bash(*curl * | bash*)",
+      "Bash(*wget * | bash*)",
+      "Bash(*curl * | sh*)",
+      "Bash(*wget * | sh*)"
+    ],
+    "ask": []
+  }
+}
